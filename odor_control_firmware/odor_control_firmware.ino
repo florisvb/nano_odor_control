@@ -77,6 +77,7 @@ void loop() {
         if (time_now > time_start_recording + pulse_delay + pulse + record_after_pulse) {
             record_flag = 0;
             Serial << "done" << endl;
+            setup();
         }
     }
       
