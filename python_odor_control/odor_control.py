@@ -1,3 +1,9 @@
+#!/usr/bin/env python
+import roslib; roslib.load_manifest('ros_flydra')
+import rospy
+from ros_flydra.srv import *
+import time
+
 """
 Python serial interface to the IO Rodeo solid state relay expansion board for 
 the Arduino Nano. 
@@ -19,13 +25,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import serial
-import pickle
+import numpy as np
 
-class OdorData():
-    def __init__(self):
-        pass
-        
-    
+import odor_dataset as od
+from odor_dataset import *
 
 class BasicSSR(serial.Serial):
 
@@ -39,50 +42,154 @@ class BasicSSR(serial.Serial):
         raw_data = []
         do_work = 1
         
+        print 'recording data!'
         while do_work:
             data = self.readline()
-            print data
             
             if 'done' in data:
                 do_work = 0
             else:
                 raw_data.append(data)
-                
+        print 'done recording data!'
         return raw_data
         
     def process_raw_data(self, raw_data):
         print 'parsing'
         
-        data_arr_tmp = np.zeros([len(raw_data), 4])
+        data_arr_tmp = np.zeros([len(raw_data), 3])
         for i, data in enumerate(raw_data):
             data_split = data.split(',')
             # Serial << ssr_state << "," << sample_num << "," << time_now << "," << sample_value << endl;
-            for j, d in enumerate(data_arr_tmp):
+            for j, d in enumerate(data_split):
                 data_arr_tmp[i, j] = data_split[j]
         
         odor_data = OdorData()
-        odor_data.odor = data_arr_tmp[:,0]
-        odor_on_index = np.where(np.diff(odor_data.odor)==1)
+        odor_data.odortrace = data_arr_tmp[:,0]
+        odor_on_index = np.where(np.diff(odor_data.odortrace)==1)[0]
         odor_data.odor_on_index = odor_on_index
         
-        odor_data.sample_num = data_arr_tmp[:,1]
-        odor_data.time = data_arr_tmp[:,2] - data_arr_tmp[odor_data.odor_on_index,2]
-        odor_data.voltage = data_arr_tmp[:,3]
+        #odor_data.sample_num = data_arr_tmp[:,1]
+        odor_data.time = data_arr_tmp[:,1] - data_arr_tmp[odor_data.odor_on_index,1]
+        odor_data.voltage = data_arr_tmp[:,2]
+        
+        print 'done parsing'
         
         return odor_data
         
     def run_experiment(self, pulse):
         
-        self.pulse(1, pulse)
-        raw_data = listen()
+        self.pulse(0, pulse)
+        raw_data = self.listen()
         odor_data = self.process_raw_data(raw_data)
         
         return odor_data
+
+
+class Flydra_Service_Listener:
+    def __init__(self):
+        rospy.wait_for_service("flydra_super_packet_service")
+        self.get_latest_flydra_data = rospy.ServiceProxy("flydra_super_packet_service", super_packet_service)
+
+    def get_position_from_flydra_data(self):
+        superpacket = self.get_latest_flydra_data().packets
+        for packet in superpacket.packets:
+            if len(packet.objects) == 1:
+                for obj in packet.objects:
+                    position = [obj.position.x, obj.position.y, obj.position.z]
+                    return position             
+
+    def get_mean_led_position(self, n_avg=20):
+        positions = None
+        n = 0
+        while n<n_avg:
+            position = self.get_position_from_flydra_data()
+            if positions is None:
+                positions = np.array(position)
+            else:
+                positions = np.vstack((positions, position))
+            n+=1
+        positions_avg = np.mean(positions, axis=0)
+        return positions_avg
+    
+def run_experiment(filename='odor_dataset', pulse=4000, odor_type=None, resistance=None, num_trials=1, gain=1):
+    if filename == 'odor_dataset':
+        try:
+            odor_dataset = od.load(filename)
+        except:
+            odor_dataset = od.OdorDataset()
+    else:
+        odor_dataset = od.OdorDataset()
         
+    try:
+        new_experiment_key = odor_dataset.experiments.keys()[-1] + 1
+    except:
+        new_experiment_key = 0
         
+    experiment = OdorExperiment(pulse, odor_type)
+    
+    for n in range(num_trials):
+        print 'running trial # ', n, ' out of ', num_trials
+        trial = run_trial(pulse, resistance, gain)
+        try:
+            new_key = experiment.trials.keys()[-1] + 1
+        except:
+            new_key = 0
+        experiment.trials.setdefault(new_key, trial)
         
+    odor_dataset.experiments.setdefault(new_experiment_key, experiment)
+    save(odor_dataset, filename)
+    print 'experiment data saved'
+    
+    return
             
+        
+        
+def run_trial(pulse, resistance=None, gain=1):
+
+    dev = BasicSSR(port='/dev/ttyUSB0',timeout=1, baudrate=115200)
+    data = dev.run_experiment(pulse)
+
+    # get flydra data    
+    print 'getting flydra data'
+    fsl = Flydra_Service_Listener()
+    position = fsl.get_mean_led_position()
+    print 'got flydra data: ', position
+    
+    new_trial = OdorTrial(position, data.time, data.odortrace, data.odor_on_index, data.voltage, resistance, gain)
+    return new_trial
             
         
+        
+
+'''    
+
+d_mm = 3.15
+d = d_mm/1000.
+r = d/2.
+area = np.pi*r**2
+wind_speed = .4
+flow_rate = area*wind_speed
+flow_rate_sccs = flow_rate*100**3
+flow_rate_sccm = flow_rate_sccs * 60.
+
+yield: 187 sccm
+'''
+
+
+
+
+
+
+
+
+if __name__ == '__main__':
+    run_experiment(filename='odor_dataset', pulse=100, odor_type='propylene', resistance=61.7, num_trials=10, gain=10)
+    
+    print 'done'
+
+
+
+
+
 
 
