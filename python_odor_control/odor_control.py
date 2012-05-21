@@ -35,8 +35,8 @@ class BasicSSR(serial.Serial):
     def __init__(self,**kwargs):
         super(BasicSSR,self).__init__(**kwargs)
            
-    def pulse(self, ssr_num, pulse_length):
-        self.write('[%d, %d]\n'%(ssr_num, pulse_length))
+    def pulse(self, ssr_num, pulse_length, pulse_interval, num_pulses, exp_length, record_data):
+        self.write('[%d, %d, %d, %d, %d]\n'%(ssr_num, pulse_length, pulse_interval, exp_length, record_data))
         
     def listen(self):
         raw_data = []
@@ -45,7 +45,7 @@ class BasicSSR(serial.Serial):
         print 'recording data!'
         while do_work:
             data = self.readline()
-            
+            print data
             if 'done' in data:
                 do_work = 0
             else:
@@ -58,14 +58,18 @@ class BasicSSR(serial.Serial):
         
         data_arr_tmp = np.zeros([len(raw_data), 3])
         for i, data in enumerate(raw_data):
-            data_split = data.split(',')
-            # Serial << ssr_state << "," << sample_num << "," << time_now << "," << sample_value << endl;
-            for j, d in enumerate(data_split):
-                data_arr_tmp[i, j] = data_split[j]
+            if data != 'done':
+                data_split = data.split(',')
+                # Serial << ssr_state << "," << sample_num << "," << time_now << "," << sample_value << endl;
+                for j, d in enumerate(data_split):
+                    data_arr_tmp[i, j] = data_split[j]
         
         odor_data = OdorData()
         odor_data.odortrace = data_arr_tmp[:,0]
-        odor_on_index = np.where(np.diff(odor_data.odortrace)==1)[0]
+        try:
+            odor_on_index = np.where(np.diff(odor_data.odortrace)==1)[0][0]
+        except:
+            odor_on_index = np.where(np.diff(odor_data.odortrace)==1)[0]
         odor_data.odor_on_index = odor_on_index
         
         #odor_data.sample_num = data_arr_tmp[:,1]
@@ -76,9 +80,8 @@ class BasicSSR(serial.Serial):
         
         return odor_data
         
-    def run_experiment(self, pulse):
-        
-        self.pulse(0, pulse)
+    def run_experiment(self, pulse_length, pulse_interval, num_pulses, exp_length, record_data):
+        self.pulse(0, pulse_length, pulse_interval, num_pulses, exp_length, record_data)
         raw_data = self.listen()
         odor_data = self.process_raw_data(raw_data)
         
@@ -111,7 +114,7 @@ class Flydra_Service_Listener:
         positions_avg = np.mean(positions, axis=0)
         return positions_avg
     
-def run_experiment(filename='odor_dataset', pulse=4000, odor_type=None, resistance=None, num_trials=1, gain=1):
+def run_experiment(filename='odor_dataset', pulse_length=100, pulse_interval=100, num_pulses=10, exp_length=10000, record_data=1, odor_type=None, resistance=None, num_trials=1, gain=1):
     if filename == 'odor_dataset':
         try:
             odor_dataset = od.load(filename)
@@ -125,11 +128,11 @@ def run_experiment(filename='odor_dataset', pulse=4000, odor_type=None, resistan
     except:
         new_experiment_key = 0
         
-    experiment = OdorExperiment(pulse, odor_type)
+    experiment = OdorExperiment(pulse_length, odor_type)
     
     for n in range(num_trials):
         print 'running trial # ', n, ' out of ', num_trials
-        trial = run_trial(pulse, resistance, gain)
+        trial = run_trial(pulse_length, pulse_interval, num_pulses, exp_length, record_data, resistance, gain)
         try:
             new_key = experiment.trials.keys()[-1] + 1
         except:
@@ -144,10 +147,11 @@ def run_experiment(filename='odor_dataset', pulse=4000, odor_type=None, resistan
             
         
         
-def run_trial(pulse, resistance=None, gain=1):
+def run_trial(pulse_length, pulse_interval, num_pulses, exp_length, record_data, resistance=None, gain=1):
 
     dev = BasicSSR(port='/dev/ttyUSB0',timeout=1, baudrate=115200)
-    data = dev.run_experiment(pulse)
+    time.sleep(2.0) # Sleep for serial reset of arduino
+    data = dev.run_experiment(pulse_length, pulse_interval, num_pulses, exp_length, record_data)
 
     # get flydra data    
     print 'getting flydra data'
@@ -183,7 +187,7 @@ yield: 187 sccm
 
 
 if __name__ == '__main__':
-    run_experiment(filename='odor_dataset', pulse=100, odor_type='propylene', resistance=61.7, num_trials=10, gain=10)
+    run_experiment(filename='odor_dataset', pulse_length=250, pulse_interval=3000, num_pulses=0, exp_length=32780, record_data=1, odor_type='acetone', resistance=100, num_trials=1, gain=1)
     
     print 'done'
 

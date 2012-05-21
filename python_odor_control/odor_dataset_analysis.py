@@ -114,7 +114,37 @@ def set_zero_pos(dataset, zero_pos):
         for trial_key, trial in exp.trials.items():
             trial.position -= zero_pos
         exp.mean_trial.position -= zero_pos
+        
+def calc_odor_onset_for_mean(experiment, odor_threshold = 3):
+    trial = experiment.mean_trial
+    odor_onset_index = np.where(trial.odor_value>odor_threshold)[0][0]
+    trial.odor_onset_index = odor_onset_index
+    trial.odor_onset_time = trial.time[odor_onset_index]
+        
+def prep_data(dataset):
     
+    calc_means_for_dataset(dataset)
+    for exp_num, experiment in dataset.experiments.items():
+        calc_odor_onset_for_mean(experiment)
+    
+    
+def get_odor_packet_speed(dataset):
+    
+    distance = []
+    time = []
+    
+    for exp_num, exp in dataset.experiments.items():
+        distance.append(exp.mean_trial.position[1])
+        time.append(exp.mean_trial.odor_onset_time)
+        
+    distance = np.array(distance)
+    time = np.array(time)
+    
+    d_distance = np.diff(distance)
+    d_dt_distance = d_distance/time[0:-1]
+    
+    return distance, time, d_dt_distance
+
 ############### PLOTTING #################    
         
 def plot_mean_odor_traces(dataset):
@@ -143,12 +173,26 @@ def plot_mean_odor_traces(dataset):
         for trial_key, trial in exp.trials.items():
             ax.plot(trial.interpolated.time, trial.interpolated.odor_value*scale + dc_offset, color='gray', linewidth=.25, zorder=-5)
         
-        #ax.fill_between(exp.mean_trial.time, np.log(exp.mean_trial.odor_value-exp.std_trial.odor_value+10)*scale + dc_offset, np.log(exp.mean_trial.odor_value+exp.std_trial.odor_value+10)*scale + dc_offset, color='gray', zorder=-10)
+        # for detecting odor:
+        ax.plot(exp.mean_trial.odor_onset_time, dc_offset, '.', color='green', markersize=2)
+        
+    # plot control signal
+    dc_offset = .02
+    scale = 0.01
+    ax.plot(exp.mean_trial.time, exp.mean_trial.odor_trace*scale + dc_offset, color='red', linewidth=.5)
+    
+    # plot curve for odor_onset
+    distance, time, d_dt_distance = get_odor_packet_speed(dataset)
+    ax.plot(time, distance, color='green', linewidth=0.5, zorder=-10)
+    print 'mean speed: ', np.mean(d_dt_distance)
+    print 'max speed: ', np.max(d_dt_distance)
+    print 'min speed: ', np.min(d_dt_distance)
+    
 
     fpl.adjust_spines(ax, ['left', 'bottom'])
     
     ax.set_xlabel('time, s')
-    ax.set_ylabel('distance from source')
+    ax.set_ylabel('distance from source, m')
     
     fig.savefig('odor_trace_example.pdf', format='pdf')
     
