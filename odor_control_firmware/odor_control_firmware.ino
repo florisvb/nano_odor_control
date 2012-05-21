@@ -40,6 +40,8 @@ uint16_t ssr_num;
 uint16_t num_pulses;
 uint16_t num_pulsed;
 
+unsigned long exp_length_units;
+
 int sample_value;
 
 
@@ -129,7 +131,7 @@ void loop() {
     if (record_flag) {
         sample_value = analogRead(ainPin);
         //Serial << ssr_state << "," << micros() << "," << sample_value << endl;
-        //Serial << time_now << "," << time_start << "," << exp_length << endl;
+        Serial << time_now << "," << time_start << "," << exp_length << endl;
         //last_sample_num = sample_num;
     }
     
@@ -142,7 +144,11 @@ void loop() {
                 pulse_length = receiver.readInt(1);
                 pulse_interval = receiver.readInt(2);
                 exp_length = receiver.readInt(3);
+                //exp_length_units = receiver.readInt(4);
                 record_data = receiver.readInt(4);
+                
+                exp_length = exp_length*1000;
+                
                 
                 time_start = millis();
                 time_prev_pulse = time_start;
